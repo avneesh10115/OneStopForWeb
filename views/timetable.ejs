@@ -1,7 +1,5 @@
 <!DOCTYPE html>
 <html lang="en">
-  <%- include('inc/header', { page: 'home' }) %>
-
   <head>
     <meta charset="UTF-8">
     <title>Timetable - OneStop for Web</title>
@@ -9,9 +7,17 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.1.1/css/all.min.css" integrity="sha512-KY4mI2fV2R+1lIhVBdGZVtN/0cZbHBHgiD9lAUNXS8rCfDq3Kr+1r0p0MVLw/BxGc5BeIrsF+MG1q1shFp74xw==" crossorigin="anonymous" referrerpolicy="no-referrer" />
     <link rel="stylesheet" href="/styles.css">
   </head>
+  <style>
+  .divider {
+    border: 0;
+    height: 2px;
+    margin: 20px 0;
+    background-image: linear-gradient(to right, rgba(0,0,0,0), rgba(0,0,0,0.75), rgba(0,0,0,0));
+  }
+</style>
   <body>
-
-
+    <%- include('inc/header', { page: 'timetable' }) %>
+    
     <div class="timetable-page container">
       <!-- Display user's department and semester (from session) -->
       <div class="user-info">
@@ -40,16 +46,27 @@
             <div class="course-card">
               <h3 class="course-title"><%= course.course_name %> (<%= course.course_code %>)</h3>
               <p class="class-timing">
-                <span class="label">Class Timing:</span> <%= course.class_timing %>
+                <span class="label">Class Timing:</span>
+                <%= course.lab_slot ? course.lab_slot : course.class_timing %>
               </p>
+              
+              <% if (course.instructor) { %>
               <p class="instructor">
-                <span class="label">Instructor:</span> <%= course.instructor %>
+                <span class="label">Instructor:</span> <%= course.instructor || "TBA" %>
               </p>
+              <% } %>
+              <% if (course.venue) { %>
               <p class="venue">
                 <span class="label">Venue:</span>
                 <i class="fas fa-map-marker-alt"></i> <%= course.venue %>
               </p>
+              <% } %>
+              
             </div>
+            <% if (course.lab_slot) { %>
+              <hr class="divider">
+              <h3 class="course-title"> Theory Courses</h3>
+            <% } %>
           <% }); %>
         <% } else { %>
           <p>No courses available for this day.</p>

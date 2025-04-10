@@ -29,10 +29,10 @@ const upload = multer({ storage: storage });
 // Class Slot Map for Timetable
 const classSlotMap = new Map([
   // Monday
-  ["A,Monday", "8:00 – 8:55"],
-  ["B,Monday", "9:00 – 9:55"],
-  ["C,Monday", "10:00 – 10:55"],
-  ["D,Monday", "11:00 – 11:55"],
+  ["A,Monday", "8:00 am – 8:55 am"],
+  ["B,Monday", "9:00 am – 9:55 am"],
+  ["C,Monday", "10:00 am – 10:55 am"],
+  ["D,Monday", "11:00 am – 11:55 am"],
   ["F,Monday", "12:00 – 12:55"],
   ["F1,Monday", "1:00 – 1:55"],
   ["D1,Monday", "2:00 – 2:55"],
@@ -40,10 +40,10 @@ const classSlotMap = new Map([
   ["B1,Monday", "4:00 – 4:55"],
   ["A1,Monday", "5:00 – 5:55"],
   // Tuesday
-  ["E,Tuesday", "8:00 – 8:55"],
-  ["A,Tuesday", "9:00 – 9:55"],
-  ["B,Tuesday", "10:00 – 10:55"],
-  ["C,Tuesday", "11:00 – 11:55"],
+  ["E,Tuesday", "8:00 am – 8:55 am"],
+  ["A,Tuesday", "9:00 am – 9:55 am"],
+  ["B,Tuesday", "10:00 am – 10:55 am"],
+  ["C,Tuesday", "11:00 am – 11:55 am"],
   ["F,Tuesday", "12:00 – 12:55"],
   ["F1,Tuesday", "1:00 – 1:55"],
   ["C1,Tuesday", "2:00 – 2:55"],
@@ -51,10 +51,10 @@ const classSlotMap = new Map([
   ["A1,Tuesday", "4:00 – 4:55"],
   ["E1,Tuesday", "5:00 – 5:55"],
   // Wednesday
-  ["D,Wednesday", "8:00 – 8:55"],
-  ["E,Wednesday", "9:00 – 9:55"],
-  ["A,Wednesday", "10:00 – 10:55"],
-  ["B,Wednesday", "11:00 – 11:55"],
+  ["D,Wednesday", "8:00 am – 8:55 am"],
+  ["E,Wednesday", "9:00 am – 9:55 am"],
+  ["A,Wednesday", "10:00 am – 10:55 am"],
+  ["B,Wednesday", "11:00 am – 11:55 am"],
   ["G,Wednesday", "12:00 – 12:55"],
   ["G1,Wednesday", "1:00 – 1:55"],
   ["B1,Wednesday", "2:00 – 2:55"],
@@ -62,10 +62,10 @@ const classSlotMap = new Map([
   ["E1,Wednesday", "4:00 – 4:55"],
   ["D1,Wednesday", "5:00 – 5:55"],
   // Thursday
-  ["C,Thursday", "8:00 – 8:55"],
-  ["D,Thursday", "9:00 – 9:55"],
-  ["E,Thursday", "10:00 - 10:55"],
-  ["A,Thursday", "11:00 - 11:55"],
+  ["C,Thursday", "8:00 am – 8:55 am"],
+  ["D,Thursday", "9:00 am – 9:55 am"],
+  ["E,Thursday", "10:00 am - 10:55 am"],
+  ["A,Thursday", "11:00 am - 11:55 am"],
   ["G,Thursday", "12:00 – 12:55"],
   ["G1,Thursday", "1:00 – 1:55"],
   ["A1,Thursday", "2:00 – 2:55"],
@@ -73,10 +73,10 @@ const classSlotMap = new Map([
   ["D1,Thursday", "4:00 – 4:55"],
   ["C1,Thursday", "5:00 – 5:55"],
   // Friday
-  ["B,Friday", "8:00 – 8:55"],
-  ["C,Friday", "9:00 – 9:55"],
-  ["D,Friday", "10:00 – 10:55"],
-  ["F,Friday", "11:00 – 11:55"],
+  ["B,Friday", "8:00 am – 8:55 am"],
+  ["C,Friday", "9:00 am – 9:55 am"],
+  ["D,Friday", "10:00 am – 10:55 am"],
+  ["F,Friday", "11:00 am – 11:55 am"],
   ["G,Friday", "12:00 – 12:55"],
   ["G1,Friday", "1:00 – 1:55"],
   ["F1,Friday", "2:00 – 2:55"],
@@ -180,17 +180,64 @@ MongoClient.connect(mongoURI, { useUnifiedTopology: true })
     const user = req.session.user;
     const selectedDay = req.query.day || "Monday";
     const semesterNumber = Number(user.semester);
+    
     const courses = await coursesCollection.find({ 
       department: new RegExp('^' + user.department + '$', 'i'),
       semester: semesterNumber 
     }).toArray();
-    const filteredCourses = courses.filter(course =>
-      classSlotMapObj[course.class_slot + ',' + selectedDay]
-    );
-    filteredCourses.forEach(course => {
-      course.class_timing = classSlotMapObj[course.class_slot + ',' + selectedDay];
+  
+    const filteredCourses = courses.filter(course => {
+      if (course.lab_slot) {
+        // For labs, ensure lab_day exists and matches the selected day (case-insensitive)
+        return course.lab_day && course.lab_day.toLowerCase() === selectedDay.toLowerCase();
+      } else {
+        return !!classSlotMapObj[course.class_slot + ',' + selectedDay];
+      }
     });
-    filteredCourses.sort((a, b) => a.class_timing.localeCompare(b.class_timing));
+  
+    filteredCourses.forEach(course => {
+      if (course.lab_slot) {
+        course.class_timing = course.lab_slot;
+      } else {
+        course.class_timing = classSlotMapObj[course.class_slot + ',' + selectedDay];
+      }
+    });
+  
+    // Helper function to convert time string to minutes since midnight.
+    function parseTimeToMinutes(timeStr) {
+      let time = timeStr.trim();
+      if (time.toLowerCase().includes("am") || time.toLowerCase().includes("pm")) {
+        let today = new Date();
+        let dateStr = today.toDateString() + " " + time;
+        let d = new Date(dateStr);
+        if (isNaN(d.getTime())) return 0;
+        return d.getHours() * 60 + d.getMinutes();
+      } else {
+        let parts = time.split(":");
+        if (parts.length < 2) return 0;
+        let hours = parseInt(parts[0], 10);
+        let minutes = parseInt(parts[1], 10);
+        // Assume PM if no am/pm is provided (unless it's 12 already)
+        if (hours !== 12) {
+          hours += 12;
+        }
+        return hours * 60 + minutes;
+      }
+    }
+  
+    // Function to extract start time from a timing string.
+    function extractStartTime(timingStr) {
+      let parts = timingStr.split("–");
+      return parts[0].trim();
+    }
+  
+    // Sort courses by start time.
+    filteredCourses.sort((a, b) => {
+      let timeA = parseTimeToMinutes(extractStartTime(a.class_timing));
+      let timeB = parseTimeToMinutes(extractStartTime(b.class_timing));
+      return timeA - timeB;
+    });
+  
     res.render('timetable', { 
       department: user.department,
       semester: user.semester,
@@ -200,6 +247,8 @@ MongoClient.connect(mongoURI, { useUnifiedTopology: true })
       page: 'timetable'
     });
   });
+  
+  
 
   // Shop Routes
 
