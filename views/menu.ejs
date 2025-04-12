@@ -29,9 +29,7 @@
                               ? selectedDay 
                               : new Date().toLocaleString('en-US', { weekday: 'long' });
          // If 'days' is not provided, default to Monday-Friday.
-         const dayList = (typeof days !== 'undefined' && days.length) 
-                           ? days 
-                           : ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
+         const dayList = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday" , "Saturday", "Sunday"];
       %>
       <select id="day-select" name="day" onchange="this.form.submit()">
         <% dayList.forEach(function(day) { %>
