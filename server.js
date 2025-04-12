@@ -147,6 +147,11 @@ MongoClient.connect(mongoURI, { useUnifiedTopology: true })
     res.render('login', { error: null, page: 'login' });
   });
 
+  app.get('/cpicalc', (req, res) => {
+    res.render('cpicalc', { error: null, page: 'cpicalc' });
+  });
+
+
   app.post('/login', async (req, res) => {
     const { roll, password } = req.body;
     const user = await usersCollection.findOne({ roll: roll });
