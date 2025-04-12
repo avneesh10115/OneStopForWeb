@@ -6,27 +6,29 @@ const path = require('path');
 const multer = require('multer');
 const fs = require('fs');
 
-// Ensure that the uploads folder exists (for shop, lost, and found routes)
+// Ensure that the uploads folder exists in public (for shop, lost, found, and notes)
 const uploadsDir = path.join(__dirname, 'public', 'uploads');
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
   console.log('Created uploads directory:', uploadsDir);
 }
 
-// Set up multer for file uploads.
-// Files will be stored in "./public/uploads" with a unique filename.
+// Set up multer for file uploads. Files will be stored in "./public/uploads" with a unique filename.
 const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
+  destination: function(req, file, cb) {
     cb(null, uploadsDir);
   },
-  filename: function (req, file, cb) {
+  filename: function(req, file, cb) {
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
     cb(null, uniqueSuffix + '-' + file.originalname);
   }
 });
 const upload = multer({ storage: storage });
 
-// Class Slot Map for Timetable
+// Create a separate multer instance for note file uploads (can reuse same storage)
+const notesUpload = upload; // We can reuse the same storage since they all go to /public/uploads
+
+// Class Slot Map for timetable
 const classSlotMap = new Map([
   // Monday
   ["A,Monday", "8:00 – 8:55"],
@@ -89,24 +91,24 @@ const classSlotMapObj = Object.fromEntries(classSlotMap);
 const app = express();
 const port = process.env.PORT || 3000;
 
-// Middleware for parsing request bodies
+// Middleware for parsing request bodies.
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
-// Session middleware
+// Session middleware.
 app.use(session({
   secret: 'somesecretkey',
   resave: false,
   saveUninitialized: false
 }));
 
-// Set view engine and serve static files from public folder.
+// Set view engine and serve static files from "public".
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Days array for timetable/menu.
-const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
+// Define days array for timetable/menu.
+const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday" ];
 
 // MongoDB connection setup.
 const mongoURI = 'mongodb://localhost:27017';
@@ -122,6 +124,9 @@ MongoClient.connect(mongoURI, { useUnifiedTopology: true })
   const menuCollection = db.collection('menu');          // Menu data
   const lostCollection = db.collection('lost');          // Lost items data
   const foundCollection = db.collection('found');        // Found items data
+  const notesCollection = db.collection('notes');        // Notes sharing data
+  const HSSCollection = db.collection('hss');          // HSS courses data
+  const MinorCollection = db.collection('minor');        // Minor courses data
 
   // Middleware to ensure the user is authenticated.
   function ensureAuthenticated(req, res, next) {
@@ -132,12 +137,12 @@ MongoClient.connect(mongoURI, { useUnifiedTopology: true })
     }
   }
 
-  // Public Routes
+  // Public Routes.
   app.get('/', (req, res) => {
     res.render('index', { page: 'home' });
   });
 
-  // Login Routes
+  // Login Routes.
   app.get('/login', (req, res) => {
     res.render('login', { error: null, page: 'login' });
   });
@@ -148,7 +153,6 @@ MongoClient.connect(mongoURI, { useUnifiedTopology: true })
     if (!user || user.password !== password) {
       return res.render('login', { error: "Invalid roll number or password.", page: 'login' });
     }
-    // Save user info in session.
     req.session.user = {
       roll: user.roll,
       department: user.department,
@@ -158,40 +162,89 @@ MongoClient.connect(mongoURI, { useUnifiedTopology: true })
     res.redirect('/timetable');
   });
 
-  // Register Routes
-  app.get('/register', (req, res) => {
-    res.render('register', { error: null, page: 'register' });
+  // Register Routes.
+  app.get('/register', async (req, res) => {
+    const HSS = await HSSCollection.find({}).toArray();
+    const Minor = await MinorCollection.find({}).toArray();
+    console.log(HSS , Minor);
+    res.render('register', { error: null, page: 'register' , HSS : HSS , Minor : Minor });
   });
 
   app.post('/register', async (req, res) => {
-    const { name, roll, password, department, semester } = req.body;
+    const { name, roll, password, department, semester, minor, HSS } = req.body;
+    const newUser = { name, roll, password, department, semester, minor : minor, HSS : HSS };
     const existingUser = await usersCollection.findOne({ roll: roll });
     if (existingUser) {
       return res.render('register', { error: "User with this roll number already exists.", page: 'register' });
     }
-    await usersCollection.insertOne({ name, roll, password, department, semester });
+    await usersCollection.insertOne(newUser);
     res.redirect('/login');
   });
 
-  // Protected Routes
+  // Protected Routes.
 
-  // Timetable Route
+  // Timetable Route.
   app.get('/timetable', ensureAuthenticated, async (req, res) => {
     const user = req.session.user;
+    let minor = await usersCollection.findOne({ roll: user.roll }).then(user => user.minor);
+    let hss = await usersCollection.findOne({ roll: user.roll }).then(user => user.HSS);
+    minor = await MinorCollection.findOne({ course_code: minor });
+    hss = await HSSCollection.findOne({ course_code: hss });
+
     const selectedDay = req.query.day || "Monday";
     const semesterNumber = Number(user.semester);
     const courses = await coursesCollection.find({ 
-      department: new RegExp('^' + user.department + '$', 'i'),
+      department: new RegExp('^' + user.department + '$', 'i') ,
       semester: semesterNumber 
     }).toArray();
-    const filteredCourses = courses.filter(course =>
-      classSlotMapObj[course.class_slot + ',' + selectedDay]
-    );
-    filteredCourses.forEach(course => {
-      course.class_timing = classSlotMapObj[course.class_slot + ',' + selectedDay];
+    const filteredCourses = courses.filter(course => {
+      if (course.lab_slot) {
+        return course.lab_day && course.lab_day.toLowerCase() === selectedDay.toLowerCase();
+      } else {
+        return !!classSlotMapObj[course.class_slot + ',' + selectedDay];
+      }
     });
-    filteredCourses.sort((a, b) => a.class_timing.localeCompare(b.class_timing));
+    filteredCourses.forEach(course => {
+      if (course.lab_slot) {
+        course.class_timing = course.lab_slot;
+      } else {
+        course.class_timing = classSlotMapObj[course.class_slot + ',' + selectedDay];
+      }
+    });
+    // Add minor hss class timings
+    function parseTimeToMinutes(timeStr) {
+      let time = timeStr.trim();
+      if (time.toLowerCase().includes("am") || time.toLowerCase().includes("pm")) {
+        let today = new Date();
+        let dateStr = today.toDateString() + " " + time;
+        let d = new Date(dateStr);
+        if (isNaN(d.getTime())) return 0;
+        return d.getHours() * 60 + d.getMinutes();
+      } else {
+        let parts = time.split(":");
+        if (parts.length < 2) return 0;
+        let hours = parseInt(parts[0], 10);
+        let minutes = parseInt(parts[1], 10);
+        if (hours !== 12) { // assume PM if not specified
+          hours += 12;
+        }
+        return hours * 60 + minutes;
+      }
+    }
+
+    function extractStartTime(timingStr) {
+      let parts = timingStr.split("–");
+      return parts[0].trim();
+    }
+
+    filteredCourses.sort((a, b) => {
+      let timeA = parseTimeToMinutes(extractStartTime(a.class_timing));
+      let timeB = parseTimeToMinutes(extractStartTime(b.class_timing));
+      return timeA - timeB;
+    });
+    console.log(minor,hss);
     res.render('timetable', { 
+      user : {minor : minor , hss : hss} ,
       department: user.department,
       semester: user.semester,
       selectedDay: selectedDay,
@@ -201,25 +254,23 @@ MongoClient.connect(mongoURI, { useUnifiedTopology: true })
     });
   });
 
-  // Shop Routes
-
-  // GET /shop: Display all shop listings.
+  // Shop Routes.
   app.get('/shop', ensureAuthenticated, async (req, res) => {
     const listings = await shopCollection.find({}).toArray();
     res.render('shop', { listings, user: req.session.user, page: 'shop' });
   });
 
-  // GET /shop/add: Render form to add a new shop listing.
   app.get('/shop/add', ensureAuthenticated, (req, res) => {
     const categories = ["Electronics", "Books", "Clothing", "Accessories", "Food"];
     res.render('shopAdd', { categories, page: 'shop' });
   });
 
-  // POST /shop/add: Process form submission, including file upload.
   app.post('/shop/add', ensureAuthenticated, upload.single('image'), async (req, res) => {
     const { product_name, description, price, category, contact_roll, contact_phone } = req.body;
-    // Build the relative URL using only the filename.
-    const image_url = req.file ? "/uploads/" + req.file.filename : "";
+    // Convert file path to relative URL.
+    const image_url = req.file
+      ? "/" + path.relative(path.join(__dirname, "public"), req.file.path).replace(/\\/g, "/")
+      : "";
     const newListing = {
       product_name,
       description,
@@ -236,14 +287,12 @@ MongoClient.connect(mongoURI, { useUnifiedTopology: true })
     res.redirect('/shop');
   });
 
-  // GET /shop/remove/:id: Remove a shop listing if it belongs to the logged-in user.
   app.get('/shop/remove/:id', ensureAuthenticated, async (req, res) => {
     const listingId = req.params.id;
     const user = req.session.user;
     if (!user) return res.redirect('/login');
     const listing = await shopCollection.findOne({ _id: new ObjectId(listingId) });
     if (listing && listing.seller_roll === user.roll) {
-      // Delete image file from public/uploads if it exists.
       if (listing.image_url) {
         const fullImagePath = path.join(__dirname, 'public', listing.image_url);
         if (fs.existsSync(fullImagePath)) {
@@ -258,7 +307,7 @@ MongoClient.connect(mongoURI, { useUnifiedTopology: true })
     res.redirect('/shop');
   });
 
-  // Menu Route (does not handle file uploads)
+  // Menu Route.
   app.get('/menu', ensureAuthenticated, async (req, res) => {
     const selectedDay = req.query.day || new Date().toLocaleDateString('en-US', { weekday: 'long' });
     let menuData = await menuCollection.findOne({ day: selectedDay });
@@ -267,27 +316,86 @@ MongoClient.connect(mongoURI, { useUnifiedTopology: true })
     } else {
       menuData = JSON.parse(JSON.stringify(menuData));
     }
-    res.render('menu', { selectedDay, days, menu: menuData, page: 'menu' });
+    res.render('menu', { selectedDay, menu: menuData, page: 'menu' });
   });
 
-  // Lost & Found Routes (Unified Page with Tabs)
+  // Lost & Found Routes (Unified Page with Tabs).
   app.get('/lostandfound', ensureAuthenticated, async (req, res) => {
     const lostItems = await lostCollection.find({}).toArray();
     const foundItems = await foundCollection.find({}).toArray();
     res.render('lostAndFound', { lostItems, foundItems, user: req.session.user, page: 'lostandfound' });
   });
 
-  // Lost Item Routes
+  // Notes Routes.
+  // GET /notes: Display notes for a given course, provided via query parameter course_code.
+  app.get('/notes', ensureAuthenticated, async (req, res) => {
+    const department = req.session.user.department;
+    const sem = req.session.user.semester;
+    if (!department) {
+      return res.send("Department not specified.");
+    }
+    const notes = await notesCollection.find({ department : department , semester : sem}).toArray();
+    res.render('notes', { notes, user: req.session.user, page: 'notes' });
+  });
 
-  // GET /lost/add: Render form to add a lost item.
+  // GET /notes/add: Render form to add a note for a given course.
+  app.get('/notes/add', ensureAuthenticated, async (req, res) => {
+    const courses = await coursesCollection.find({ 
+      department: new RegExp('^' + req.session.user.department + '$', 'i'),
+      semester: Number(req.session.user.semester)
+    }).toArray();
+    res.render('notesAdd', { user: req.session.user, page: 'notes' , courses : courses});
+  });
+
+  // POST /notes/add: Process form submission for adding a note.
+  app.post('/notes/add', ensureAuthenticated, notesUpload.single('noteFile'), async (req, res) => {
+    const { course_code , title } = req.body;
+    const file_url = req.file
+      ? "/" + path.relative(path.join(__dirname, "public"), req.file.path).replace(/\\/g, "/")
+      : "";
+    const noteDoc = {
+      course_code,
+      title,
+      file_url,
+      department : req.session.user.department,
+      semester: req.session.user.semester,
+      uploader: { roll: req.session.user.roll, name: req.session.user.name },
+      created_at: new Date(),
+      updated_at: new Date()
+    };
+    await notesCollection.insertOne(noteDoc);
+    res.redirect('/notes');
+  });
+
+  // GET /notes/remove/:id: Remove a note if it belongs to the logged-in user.
+  app.get('/notes/remove/:id', ensureAuthenticated, async (req, res) => {
+    const noteId = req.params.id;
+    const note = await notesCollection.findOne({ _id: new ObjectId(noteId) });
+    if (note && note.uploader.roll === req.session.user.roll) {
+      if (note.file_url) {
+        const fullPath = path.join(__dirname, 'public', note.file_url);
+        if (fs.existsSync(fullPath)) {
+          fs.unlink(fullPath, (err) => {
+            if (err) console.error("Error deleting note file:", err);
+          });
+        }
+      }
+      await notesCollection.deleteOne({ _id: new ObjectId(noteId) });
+      return res.redirect('/notes?course_code=' + note.course_code);
+    }
+    res.redirect('/notes');
+  });
+
+  // Lost Item Routes.
   app.get('/lost/add', ensureAuthenticated, (req, res) => {
     res.render('lostAdd', { page: 'lostandfound' });
   });
 
-  // POST /lost/add: Process form submission for a lost item.
   app.post('/lost/add', ensureAuthenticated, upload.single('image'), async (req, res) => {
     const { item_name, description, where_lost, when_lost, contact_roll, contact_phone } = req.body;
-    const image_url = req.file ? "/uploads/" + req.file.filename : "";
+    const image_url = req.file
+      ? "/" + path.relative(path.join(__dirname, "public"), req.file.path).replace(/\\/g, "/")
+      : "";
     const lostItem = {
       item_name,
       description,
@@ -304,7 +412,6 @@ MongoClient.connect(mongoURI, { useUnifiedTopology: true })
     res.redirect('/lostandfound');
   });
 
-  // GET /lost/remove/:id: Remove a lost item if it belongs to the logged-in user.
   app.get('/lost/remove/:id', ensureAuthenticated, async (req, res) => {
     const itemId = req.params.id;
     const user = req.session.user;
@@ -323,17 +430,16 @@ MongoClient.connect(mongoURI, { useUnifiedTopology: true })
     res.redirect('/lostandfound');
   });
 
-  // Found Item Routes
-
-  // GET /found/add: Render form to add a found item.
+  // Found Item Routes.
   app.get('/found/add', ensureAuthenticated, (req, res) => {
     res.render('foundAdd', { page: 'lostandfound' });
   });
 
-  // POST /found/add: Process form submission for a found item.
   app.post('/found/add', ensureAuthenticated, upload.single('image'), async (req, res) => {
     const { item_name, description, when_found, submitted_where, contact_roll, contact_phone } = req.body;
-    const image_url = req.file ? "/uploads/" + req.file.filename : "";
+    const image_url = req.file
+      ? "/" + path.relative(path.join(__dirname, "public"), req.file.path).replace(/\\/g, "/")
+      : "";
     const foundItem = {
       item_name,
       description,
@@ -350,7 +456,6 @@ MongoClient.connect(mongoURI, { useUnifiedTopology: true })
     res.redirect('/lostandfound');
   });
 
-  // GET /found/remove/:id: Remove a found item if it belongs to the logged-in user.
   app.get('/found/remove/:id', ensureAuthenticated, async (req, res) => {
     const itemId = req.params.id;
     const user = req.session.user;
@@ -369,7 +474,7 @@ MongoClient.connect(mongoURI, { useUnifiedTopology: true })
     res.redirect('/lostandfound');
   });
 
-  // Logout Route
+  // Logout Route.
   app.get('/logout', (req, res) => {
     req.session.destroy();
     res.redirect('/login');
