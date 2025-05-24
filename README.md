@@ -1,5 +1,7 @@
 # OneStopForWeb
 
+![image](https://github.com/user-attachments/assets/56358770-e2b2-4bde-92b5-fe153970363c)
+
 **OneStopForWeb** is a student‐portal web app built with Express.js, EJS templates, and MongoDB. It bundles common campus utilities in one place:
 
 - **User Auth**: register/login (roll-number + password)  
@@ -128,6 +130,10 @@ OneStopForWeb/
 | GET    | `/timetable`           | View timetable (e.g. `?day=Monday`)     |
 | GET    | `/menu`                | View menu (e.g. `?day=Wednesday`)       |
 
+## Hosting
+
+This website is hosted at http://51.79.156.194:3000/
+(Timetable is only available for specific departments)
 
 ## 📄 License
 
