@@ -2,6 +2,8 @@
 
 ![image](https://github.com/user-attachments/assets/56358770-e2b2-4bde-92b5-fe153970363c)
 
+Demo Video is present in the releases section.
+
 **OneStopForWeb** is a student‐portal web app built with Express.js, EJS templates, and MongoDB. It bundles common campus utilities in one place:
 
 - **User Auth**: register/login (roll-number + password)  
